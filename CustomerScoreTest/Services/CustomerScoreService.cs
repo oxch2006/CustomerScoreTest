@@ -68,9 +68,13 @@ public class CustomerScoreService : ICustomerScoreService
         {
             var score = scorePair.Key;
             var customersInScore = CustomerRepository.AllScoresAndCustomers[score];
+            rank = rank + customersInScore.Count();
+            rank2 = rank;
+            if (rank < start) continue;
+            
             foreach (var customer in customersInScore)
             {
-                if (rank >= start && rank <= end)
+                if (rank2 >= start && rank2 <= end)
                 {
                     customers.Add(new Customer()
                     {
@@ -81,7 +85,7 @@ public class CustomerScoreService : ICustomerScoreService
                 }
                 if (rank2 > end) break;
             }
-            rank = rank + customersInScore.Count();
+            
             if (rank > end) break;
 
         }
