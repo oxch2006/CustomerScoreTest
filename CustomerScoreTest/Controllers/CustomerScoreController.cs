@@ -15,11 +15,12 @@ namespace CustomerScoreTest.Controllers
             _customerScoreService = customerScoreService;
         }
 
+
         [ProducesResponseType(typeof(UpdateCustomerResponse), 200)]
         [HttpPost("~/customer/{customerid}/score/{score}")]
         public async Task<IActionResult> UpdateCustomer(long customerid, int score)
         {
-            if (score < -1000 || score > 1000) return BadRequest();
+            if (score < -1000 || score > 1000) return BadRequest("score should be in range of -1000 and 1000");
             var restult =await _customerScoreService.UpdateCustomer(customerid, score);
             return Ok(restult);
         }
@@ -38,6 +39,13 @@ namespace CustomerScoreTest.Controllers
         {
             var restult = await _customerScoreService.GetGustomersByCustomerId(customerid, high, low);
             return Ok(restult);
+        }
+
+        [HttpPost("~/customer/import")]
+        public async Task<IActionResult> ImportData()
+        {
+            await _customerScoreService.ImportData();
+            return Ok();
         }
     }
 }

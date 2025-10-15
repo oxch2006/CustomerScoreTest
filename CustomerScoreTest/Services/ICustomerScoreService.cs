@@ -9,5 +9,6 @@ public interface ICustomerScoreService
 
     Task<List<Customer>> GetGustomersByCustomerId(long customerid, int high, int low);
 
+    Task ImportData();
 }
 

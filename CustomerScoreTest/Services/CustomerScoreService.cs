@@ -1,13 +1,18 @@
 ﻿using CustomerScoreTest.Models;
 using CustomerScoreTest.Repositories;
-using System;
-using System.Security.Cryptography.Xml;
 
 namespace CustomerScoreTest.Services;
 
 public class CustomerScoreService : ICustomerScoreService
 {
     private static object _locker = new object();
+
+    private readonly IWebHostEnvironment _webHostEnvironment;
+
+    public CustomerScoreService(IWebHostEnvironment webHostEnvironment)
+    {
+        _webHostEnvironment = webHostEnvironment;
+    }
 
     public async Task<UpdateCustomerResponse> UpdateCustomer(long customerid, int score)
     {
@@ -45,6 +50,8 @@ public class CustomerScoreService : ICustomerScoreService
         #endregion
 
         #region Save customer to CustomerRepository.AllScoresAndCustomers
+        if (!CustomerRepository.AllScoresAndCustomers.ContainsKey(newScore))
+            CustomerRepository.AllScoresAndCustomers.TryAdd(newScore, new SortedList<long, long>());
         if (customer.Key == 0)
         {
             CustomerRepository.AllScoresAndCustomers[newScore].Add(customerid, customerid);
@@ -69,9 +76,8 @@ public class CustomerScoreService : ICustomerScoreService
             var score = scorePair.Key;
             var customersInScore = CustomerRepository.AllScoresAndCustomers[score];
             rank = rank + customersInScore.Count();
-            rank2 = rank;
             if (rank < start) continue;
-            
+            rank2 = rank - customersInScore.Count() + 1;
             foreach (var customer in customersInScore)
             {
                 if (rank2 >= start && rank2 <= end)
@@ -80,12 +86,13 @@ public class CustomerScoreService : ICustomerScoreService
                     {
                         CustomerID = customer.Key,
                         Score = score,
-                        Rank = ++rank2
+                        Rank = rank2
                     });
                 }
+                rank2++;
                 if (rank2 > end) break;
             }
-            
+
             if (rank > end) break;
 
         }
@@ -96,19 +103,38 @@ public class CustomerScoreService : ICustomerScoreService
     {
         List<Customer> customers = new List<Customer>();
         var customer = CustomerRepository.AllCustomerScores.FirstOrDefault(c => c.Key == customerid);
-        if (customer.Key != 0) //find the customerid
+        if (customer.Key != 0) // the customerid exist
         {
             int customerScore = customer.Value;
             int customerRank = 0;
             int rank = 0;
-            int rank2 = 1;
+            int customerScoreIndex = CustomerRepository.AllScores.IndexOfKey(customerScore);
+            int lowScore=0, highScore=0;
+
+            #region get high score and low score
+            int lowScoreIndex = customerScoreIndex;
+            while (lowScoreIndex < CustomerRepository.AllScores.Count && lowScoreIndex < customerScoreIndex + low)
+            {
+                lowScore = CustomerRepository.AllScores.GetKeyAtIndex(lowScoreIndex);
+                lowScoreIndex++;
+            }
+
+            int highScoreIndex = customerScoreIndex;
+            while (highScoreIndex >= 0 && highScoreIndex> customerScoreIndex - high)
+            {
+                highScore = CustomerRepository.AllScores.GetKeyAtIndex(highScoreIndex);
+                highScoreIndex--;
+            }
+            #endregion
+
             foreach (var scorePair in CustomerRepository.AllScores)
             {
                 var score = scorePair.Key;
                 var customersInScore = CustomerRepository.AllScoresAndCustomers[score];
                 rank = rank + customersInScore.Count();
-                if (score >= customerScore - low && score <= customerScore + high) //use score instead rank, expand the range
+                if (score >= customerScore - lowScore && score <= customerScore + highScore) //use score instead rank, expand the range
                 {
+                    int rank2 = rank - customersInScore.Count() + 1;
                     foreach (var customerId in customersInScore)
                     {
                         customers.Add(new Customer()
@@ -132,5 +158,26 @@ public class CustomerScoreService : ICustomerScoreService
         return await Task.FromResult(customers);
     }
 
+    public async Task ImportData()
+    {
+        string filePath = Path.Combine(_webHostEnvironment.WebRootPath, "customerScore.txt");
+        if (File.Exists(filePath))
+        {
+            string[] lines = File.ReadAllLines(filePath);
+            foreach (string line in lines)
+            {
+                string[] fields = line.Split('|', StringSplitOptions.RemoveEmptyEntries);
+
+                if (fields.Length >= 2)
+                {
+                    if (fields[0].Trim().ToLower() == "customerid") continue;
+                    long customerId = long.Parse(fields[0].Trim());
+                    int score = int.Parse(fields[1].Trim());
+                    await UpdateCustomer(customerId, score);
+                }
+
+            }
+        }
+    }
 }
 
