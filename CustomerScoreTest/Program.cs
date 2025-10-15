@@ -36,10 +36,5 @@ namespace CustomerScoreTest
 
             app.Run();
         }
-
-        private static IHostedService QueueService(IServiceProvider provider)
-        {
-            throw new NotImplementedException();
-        }
     }
 }
