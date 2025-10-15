@@ -1,5 +1,6 @@
 
 using CustomerScoreTest.Services;
+using CustomerScoreTest.Tools;
 
 namespace CustomerScoreTest
 {
@@ -11,7 +12,7 @@ namespace CustomerScoreTest
 
             // Add services to the container.
 
-            builder.Services.AddControllers();
+            builder.Services.AddControllers(options=>options.Filters.Add(new ExceptionFilter()));
             builder.Services.AddSingleton<ICustomerScoreService, CustomerScoreService>();
            
 
