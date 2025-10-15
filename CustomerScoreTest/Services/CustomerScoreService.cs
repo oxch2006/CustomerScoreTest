@@ -59,6 +59,17 @@ public class CustomerScoreService : ICustomerScoreService
         else
         {
             CustomerRepository.AllScoresAndCustomers[customer.Value].Remove(customerid); //remove the customerid from the old score
+            if(CustomerRepository.AllScoresAndCustomers[customer.Value].Count == 0)
+            {
+                CustomerRepository.AllScoresAndCustomers.TryRemove(customer.Value, out _); //clear score which not has customer
+                lock (_locker)
+                {
+                    if (CustomerRepository.AllScores.ContainsKey(customer.Value))
+                    {
+                        CustomerRepository.AllScores.Remove(customer.Value); //clear score which not has customer
+                    }
+                }
+            }
             CustomerRepository.AllScoresAndCustomers[newScore].Add(customerid, customerid); //add the customerid to the new score
         }
         #endregion
