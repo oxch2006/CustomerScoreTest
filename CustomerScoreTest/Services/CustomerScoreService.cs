@@ -39,38 +39,25 @@ public class CustomerScoreService : ICustomerScoreService
         }
         #endregion
 
-        #region Save score to CustomerRepository.AllScores
+        #region Save score and customer count to CustomerRepository.AllScoresAndCustomerCount
         lock (_locker)
         {
-            if (!CustomerRepository.AllScores.ContainsKey(newScore))
+            //handle old score
+            if (CustomerRepository.AllScoresAndCustomerCount.ContainsKey(customer.Value))
             {
-                CustomerRepository.AllScores.Add(newScore, newScore);
+                CustomerRepository.AllScoresAndCustomerCount[customer.Value] = CustomerRepository.AllScoresAndCustomerCount[customer.Value] - 1;
             }
-        }
-        #endregion
 
-        #region Save customer to CustomerRepository.AllScoresAndCustomers
-        if (!CustomerRepository.AllScoresAndCustomers.ContainsKey(newScore))
-            CustomerRepository.AllScoresAndCustomers.TryAdd(newScore, new SortedList<long, long>());
-        if (customer.Key == 0)
-        {
-            CustomerRepository.AllScoresAndCustomers[newScore].Add(customerid, customerid);
-        }
-        else
-        {
-            CustomerRepository.AllScoresAndCustomers[customer.Value].Remove(customerid); //remove the customerid from the old score
-            if(CustomerRepository.AllScoresAndCustomers[customer.Value].Count == 0)
+            //handle new score
+            if (CustomerRepository.AllScoresAndCustomerCount.ContainsKey(newScore))
             {
-                CustomerRepository.AllScoresAndCustomers.TryRemove(customer.Value, out _); //clear score which not has customer
-                lock (_locker)
-                {
-                    if (CustomerRepository.AllScores.ContainsKey(customer.Value))
-                    {
-                        CustomerRepository.AllScores.Remove(customer.Value); //clear score which not has customer
-                    }
-                }
+                CustomerRepository.AllScoresAndCustomerCount[newScore] = CustomerRepository.AllScoresAndCustomerCount[newScore] + 1;
             }
-            CustomerRepository.AllScoresAndCustomers[newScore].Add(customerid, customerid); //add the customerid to the new score
+            else
+            {
+                CustomerRepository.AllScoresAndCustomerCount[newScore] = 1;
+            }
+
         }
         #endregion
 
@@ -81,32 +68,41 @@ public class CustomerScoreService : ICustomerScoreService
     public async Task<List<Customer>> GetGustomersByRank(int start, int end)
     {
         List<Customer> customers = new List<Customer>();
-        int rank = 0, rank2 = 0;
-        foreach (var scorePair in CustomerRepository.AllScores)
+        int rank = 0;
+        List<int> scores = new List<int>();
+        foreach (var scorePair in CustomerRepository.AllScoresAndCustomerCount)
         {
             var score = scorePair.Key;
-            var customersInScore = CustomerRepository.AllScoresAndCustomers[score];
-            rank = rank + customersInScore.Count();
+            var customerCountInScore = scorePair.Value;
+            rank = rank + customerCountInScore;
             if (rank < start) continue;
-            rank2 = rank - customersInScore.Count() + 1;
-            foreach (var customer in customersInScore)
-            {
-                if (rank2 >= start && rank2 <= end)
-                {
-                    customers.Add(new Customer()
-                    {
-                        CustomerID = customer.Key,
-                        Score = score,
-                        Rank = rank2
-                    });
-                }
-                rank2++;
-                if (rank2 > end) break;
-            }
-
+            scores.Add(score);
             if (rank > end) break;
-
         }
+        int? maxScore = scores.FirstOrDefault();
+        if (maxScore == null) return customers;
+
+        int minRank = CustomerRepository.AllScoresAndCustomerCount.Where(s => s.Key > maxScore).Sum(c => c.Value);
+        foreach (int score in scores)
+        {
+            foreach (var customer in CustomerRepository.AllCustomerScores.Where(c => c.Value == score))
+            {
+                customers.Add(new Customer()
+                {
+                    CustomerID = customer.Key,
+                    Score = customer.Value
+                });
+            }
+        }
+
+        customers = customers.OrderByDescending(c => c.Score).ThenBy(c => c.CustomerID).ToList();
+        foreach (var c in customers)
+        {
+            c.Rank = minRank + 1;
+            minRank++;
+        }
+
+        customers = customers.Where(c => c.Rank >= start && c.Rank <= end).ToList();
         return await Task.FromResult(customers);
     }
 
@@ -118,51 +114,47 @@ public class CustomerScoreService : ICustomerScoreService
         {
             int customerScore = customer.Value;
             int customerRank = 0;
-            int rank = 0;
-            int customerScoreIndex = CustomerRepository.AllScores.IndexOfKey(customerScore);
-            int lowScore=0, highScore=0;
+            int[] allScores = CustomerRepository.AllScoresAndCustomerCount.Select(s => s.Key).Reverse().ToArray();
+            int customerScoreIndex = Search(allScores, customerScore);
+            //int customerScoreIndex = CustomerRepository.AllScoresAndCustomerCount.IndexOfKey(customerScore);
+            int lowScore = 0, highScore = 0;
 
             #region get high score and low score
             int lowScoreIndex = customerScoreIndex;
-            while (lowScoreIndex < CustomerRepository.AllScores.Count && lowScoreIndex < customerScoreIndex + low)
+            while (lowScoreIndex < CustomerRepository.AllScoresAndCustomerCount.Count && lowScoreIndex <= customerScoreIndex + low)
             {
-                lowScore = CustomerRepository.AllScores.GetKeyAtIndex(lowScoreIndex);
+                lowScore = CustomerRepository.AllScoresAndCustomerCount.GetKeyAtIndex(lowScoreIndex);
                 lowScoreIndex++;
             }
 
             int highScoreIndex = customerScoreIndex;
-            while (highScoreIndex >= 0 && highScoreIndex> customerScoreIndex - high)
+            while (highScoreIndex >= 0 && highScoreIndex >= customerScoreIndex - high)
             {
-                highScore = CustomerRepository.AllScores.GetKeyAtIndex(highScoreIndex);
+                highScore = CustomerRepository.AllScoresAndCustomerCount.GetKeyAtIndex(highScoreIndex);
                 highScoreIndex--;
             }
             #endregion
 
-            foreach (var scorePair in CustomerRepository.AllScores)
+            int minRank = CustomerRepository.AllScoresAndCustomerCount.Where(s => s.Key > highScore).Sum(c => c.Value);
+            List<int> scores = CustomerRepository.AllScoresAndCustomerCount.Where(k=>k.Key>=lowScore && k.Key<=highScore).Select(k=>k.Key).ToList();
+            foreach (int score in scores)
             {
-                var score = scorePair.Key;
-                var customersInScore = CustomerRepository.AllScoresAndCustomers[score];
-                rank = rank + customersInScore.Count();
-                if (score >= customerScore - lowScore && score <= customerScore + highScore) //use score instead rank, expand the range
+                foreach (var cs in CustomerRepository.AllCustomerScores.Where(c => c.Value == score))
                 {
-                    int rank2 = rank - customersInScore.Count() + 1;
-                    foreach (var customerId in customersInScore)
+                    customers.Add(new Customer()
                     {
-                        customers.Add(new Customer()
-                        {
-                            CustomerID = customerId.Key,
-                            Score = score,
-                            Rank = rank2
-                        });
-
-                        if (customerId.Key == customerid)
-                        {
-                            customerRank = rank2;
-                        }
-                        rank2++;
-                    }
+                        CustomerID = cs.Key,
+                        Score = cs.Value
+                    });
                 }
             }
+            customers = customers.OrderByDescending(c => c.Score).ThenBy(c => c.CustomerID).ToList();
+            foreach (var c in customers)
+            {
+                c.Rank = minRank + 1;
+                minRank++;
+            }
+            customerRank = customers.First(c => c.CustomerID == customerid).Rank;
             customers = customers.Where(c => c.Rank >= customerRank - high && c.Rank <= customerRank + low).ToList();
         }
 
@@ -189,6 +181,40 @@ public class CustomerScoreService : ICustomerScoreService
 
             }
         }
+    }
+
+    public int Search(int[] arr, int key)
+    {
+        if (arr == null || arr.Length == 0)
+            return -1;
+
+        int low = 0;
+        int high = arr.Length - 1;
+
+        while (low <= high && key >= arr[low] && key <= arr[high])
+        {
+
+            if (arr[high] == arr[low])
+            {
+                if (arr[low] == key)
+                    return low;
+                return -1;
+            }
+
+            int pos = low + ((key - arr[low]) * (high - low)) / (arr[high] - arr[low]);
+
+            if (pos < low || pos > high)
+                break;
+
+            if (arr[pos] == key)
+                return pos;
+            else if (arr[pos] < key)
+                low = pos + 1;
+            else
+                high = pos - 1;
+        }
+
+        return -1;
     }
 }
 
